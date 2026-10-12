@@ -1,0 +1,41 @@
+# Executáveis compilados
+*.out
+
+# Saida do "make build"
+/bin/
+
+# Arquivos temporários
+*.tmp
+
+# Arquivos do VS Code
+.vscode/
+
+# Arquivos do sistema Windows
+Thumbs.db
+Desktop.ini
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Code coverage profiles and other test artifacts
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env

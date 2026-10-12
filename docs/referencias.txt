@@ -1,0 +1,9 @@
+ALENCAR, Kiara Luz. VaiJunto: protótipo centralizado de caronas compartilhadas (Problema 1 – TEC502). 2026. Disponível em: https://github.com/kiaralencar/vaijunto. Acesso em: 02 out. 2026.
+
+FIELDING, Roy Thomas. Architectural Styles and the Design of Network-based Software Architectures. 2000. Tese (Doutorado em Information and Computer Science) – University of California, Irvine, 2000. Disponível em: https://ics.uci.edu/~fielding/pubs/dissertation/top.htm. Acesso em: 08 out. 2026.
+
+INTERNET ENGINEERING TASK FORCE. RFC 8259: The JavaScript Object Notation (JSON) Data Interchange Format. 2017. Disponível em: https://www.rfc-editor.org/rfc/rfc8259. Acesso em: 09 out. 2026.
+
+INTERNET ENGINEERING TASK FORCE. RFC 9110: HTTP Semantics. 2022. Disponível em: https://www.rfc-editor.org/rfc/rfc9110. Acesso em: 09 out. 2026.
+
+THE GO AUTHORS. Documentação oficial da linguagem Go. Disponível em: https://go.dev/doc/. Acesso em: 11 out. 2026.
