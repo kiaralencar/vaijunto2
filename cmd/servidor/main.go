@@ -1,8 +1,10 @@
 // Servidor de uma empresa do consórcio VaiJunto. Atende os clientes motorista e
 // passageiro por TCP (uma goroutine por cliente, protocolo do Problema 1) e oferece
-// uma API REST por HTTP aos servidores das outras empresas. Também verifica
-// periodicamente se os vizinhos estão ativos. O estado da empresa fica em memória,
-// protegido por um mutex.
+// uma API REST por HTTP aos servidores das outras empresas. Busca itinerários
+// juntando as caronas dos vizinhos e coordena reservas atômicas entre empresas
+// (preparar/confirmar, com precedência pelo relógio de Lamport). O estado da
+// empresa fica em memória, protegido por um mutex, e é gravado em disco a cada
+// alteração para ser recuperado quando o servidor volta de uma queda.
 package main
 
 import (
@@ -25,6 +27,12 @@ type Sessao struct {
 func main() {
 	cfg := lerConfig() // Lê as flags de configuração
 
+	s, err := NovoServidor(cfg) // Recupera o estado gravado, se houver
+	if err != nil {
+		fmt.Println("Erro ao iniciar:", err)
+		os.Exit(1)
+	}
+
 	// Porta sem IP explícito = escuta em todos os endereços desta máquina.
 	l, err := net.Listen("tcp", ":"+cfg.PortaTCP)
 	if err != nil {
@@ -35,10 +43,8 @@ func main() {
 	fmt.Printf("Empresa %s | clientes na porta TCP %s | API REST na porta %s | vizinhos: %v\n",
 		cfg.Empresa, cfg.PortaTCP, cfg.PortaHTTP, cfg.Vizinhos)
 
-	estado := NovoEstado()
-
-	go iniciaAPI(cfg, estado)  // API REST entre servidores
-	iniciaMonitorVizinhos(cfg) // Verifica periodicamente se os vizinhos estão ativos
+	go s.IniciaAPI()  // API REST entre servidores
+	s.IniciaRotinas() // Vizinhos, reenvio de mensagens e prazos das reservas
 
 	// Accept() bloqueia até alguém conectar.
 	for {
@@ -50,12 +56,12 @@ func main() {
 
 		// Dispara a goroutine e volta imediatamente ao topo do for, pronto pra aceitar 
 		// o próximo cliente (permite atender várias pessoas ao mesmo tempo)
-		go atendeCliente(conn, estado)
+		go atendeCliente(conn, s)
 	}
 }
 
-// atendeCliente roda numa goroutine própria, uma por conexão. 
-func atendeCliente(conn net.Conn, estado *Estado) { // O mesmo estado criado no main() é compartilhado entre todas as goroutines
+// atendeCliente roda numa goroutine própria, uma por conexão.
+func atendeCliente(conn net.Conn, s *Servidor) { // O mesmo servidor criado no main() é compartilhado entre todas as goroutines
 	defer conn.Close() // Fechar a conexao ao retornar (desconexao ou erro)
 	sessao := &Sessao{}
 	leitor := bufio.NewReader(conn)
@@ -76,7 +82,7 @@ func atendeCliente(conn net.Conn, estado *Estado) { // O mesmo estado criado no 
 			return // Encerra só esta goroutine
 		}
 
-		resposta := processaLinha(linha, estado, sessao)
+		resposta := processaLinha(linha, s, sessao)
 
 		saida, err := json.Marshal(resposta)
 		if err != nil {

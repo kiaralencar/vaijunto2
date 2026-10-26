@@ -2,8 +2,18 @@ ALENCAR, Kiara Luz. VaiJunto: protótipo centralizado de caronas compartilhadas 
 
 FIELDING, Roy Thomas. Architectural Styles and the Design of Network-based Software Architectures. 2000. Tese (Doutorado em Information and Computer Science) – University of California, Irvine, 2000. Disponível em: https://ics.uci.edu/~fielding/pubs/dissertation/top.htm. Acesso em: 08 out. 2026.
 
+GILBERT, Seth; LYNCH, Nancy. Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services. ACM SIGACT News, v. 33, n. 2, p. 51-59, 2002.
+
+GRAY, Jim. Notes on Data Base Operating Systems. In: BAYER, R.; GRAHAM, R. M.; SEEGMÜLLER, G. (Ed.). Operating Systems: An Advanced Course. Berlin: Springer, 1978. p. 393-481. (Lecture Notes in Computer Science, v. 60).
+
 INTERNET ENGINEERING TASK FORCE. RFC 8259: The JavaScript Object Notation (JSON) Data Interchange Format. 2017. Disponível em: https://www.rfc-editor.org/rfc/rfc8259. Acesso em: 09 out. 2026.
 
 INTERNET ENGINEERING TASK FORCE. RFC 9110: HTTP Semantics. 2022. Disponível em: https://www.rfc-editor.org/rfc/rfc9110. Acesso em: 09 out. 2026.
+
+LAMPORT, Leslie. Time, Clocks, and the Ordering of Events in a Distributed System. Communications of the ACM, v. 21, n. 7, p. 558-565, 1978.
+
+ROSENKRANTZ, Daniel J.; STEARNS, Richard E.; LEWIS, Philip M. System Level Concurrency Control for Distributed Database Systems. ACM Transactions on Database Systems, v. 3, n. 2, p. 178-198, 1978.
+
+TANENBAUM, Andrew S.; VAN STEEN, Maarten. Distributed Systems: Principles and Paradigms. 2. ed. Upper Saddle River: Pearson Prentice Hall, 2007.
 
 THE GO AUTHORS. Documentação oficial da linguagem Go. Disponível em: https://go.dev/doc/. Acesso em: 11 out. 2026.

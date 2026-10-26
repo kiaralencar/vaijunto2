@@ -225,8 +225,8 @@ func listarCaronas(enviar func(string, interface{}) protocolo.Resposta) {
 		return
 	}
 	for _, c := range dados.Caronas {
-		fmt.Printf("\nID: %s\nMotorista: %s\nRota: %v\nData: %s\nAssentos livres: %v\nPreco por trecho: %v\n",
-			c.ID, c.Motorista, c.Rota, c.Data, c.AssentosLivres, c.PrecoPorTrecho)
+		fmt.Printf("\nID: %s\nEmpresa: %s\nMotorista: %s\nRota: %s\nData: %s\nAssentos livres: %v\nPreco por trecho: %v\n",
+			c.ID, c.Empresa, c.Motorista, strings.Join(c.Rota, " -> "), c.Data, c.AssentosLivres, c.PrecoPorTrecho)
 	}
 }
 

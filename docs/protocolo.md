@@ -1,7 +1,22 @@
-# Protocolo VaiJunto
+# Protocolo VaiJunto (cliente ↔ servidor da própria empresa)
 
 Protocolo de aplicação próprio, sobre socket TCP puro (pacote `net` do Go).
 Sem HTTP, sem framework de mensageria ou RPC.
+
+É o mesmo protocolo do Problema 1: os clientes motorista e passageiro foram
+reaproveitados e continuam conectando **somente no servidor da sua própria
+empresa**, sem saber que existem outras. A comunicação **entre os servidores**
+das empresas é feita por uma API REST separada, especificada em
+[`api-rest.md`](api-rest.md).
+
+O que mudou em relação ao Problema 1:
+
+- IDs passaram a ser únicos no consórcio: caronas são `"<empresa>-C<n>"`
+  (ex.: `"vaijunto-C1"`) e reservas `"<empresa>-R<n>"` (ex.: `"rotasul-R7"`).
+- Itens de itinerário e caronas listadas trazem o campo `empresa`.
+- `LISTAR_CARONAS` e `BUSCAR_ITINERARIOS` passam a enxergar as caronas de
+  todo o consórcio (o servidor consulta os vizinhos por trás).
+- `RESERVAR` passa a coordenar a reserva em todas as empresas envolvidas.
 
 ## Por que TCP, e não UDP
 
@@ -97,11 +112,12 @@ Pedido `dados`: `{"nome": "Maria", "senha": "qualquercoisa"}`
 Resposta `dados`: `{}`
 
 Efeito: associa o nome informado a esta conexão (sessão). A senha não é um
-sistema de conta completo (sem hashing, sem persistência) — serve só para
-evitar que dois clientes diferentes colidam usando o mesmo nome sem querer:
-quem usa um nome pela primeira vez "registra" a senha para ele (em memória);
-logins seguintes com o mesmo nome precisam vir com a mesma senha, senão são
-recusados.
+sistema de conta completo (sem hashing) — serve só para evitar que dois
+clientes diferentes colidam usando o mesmo nome sem querer: quem usa um nome
+pela primeira vez "registra" a senha para ele; logins seguintes com o mesmo
+nome precisam vir com a mesma senha, senão são recusados. Os nomes e senhas
+ficam no armazenamento da própria empresa: cada empresa tem os seus usuários,
+e um passageiro não precisa de conta nas outras.
 
 ### `PUBLICAR_CARONA`
 
@@ -114,7 +130,7 @@ Pedido `dados`:
   "assentos_por_trecho": [2]
 }
 ```
-Resposta `dados`: `{"carona_id": "c1"}`
+Resposta `dados`: `{"carona_id": "vaijunto-C1"}`
 
 Regra: `preco_por_trecho` e `assentos_por_trecho` têm exatamente um valor por
 trecho, isto é, `len(rota) - 1` valores.
@@ -132,7 +148,7 @@ Resposta `dados`:
 {
   "caronas": [
     {
-      "id": "c1", "motorista": "Joao",
+      "id": "vaijunto-C1", "empresa": "vaijunto", "motorista": "Joao",
       "rota": ["Salvador", "Vitoria da Conquista"],
       "data": "20/09/2026",
       "preco_por_trecho": [50],
@@ -142,13 +158,19 @@ Resposta `dados`:
 }
 ```
 
+Lista as caronas ativas de **todo o consórcio**: as da própria empresa e as
+de cada vizinho que estiver no ar. O nome do motorista só aparece nas caronas
+da própria empresa — as outras empresas não enviam esse dado (privacidade).
+
 ### `CONSULTAR_PASSAGEIROS`
 
-Pedido `dados`: `{"carona_id": "c1"}`
+Pedido `dados`: `{"carona_id": "vaijunto-C1"}`
 Resposta `dados`:
 ```json
-{"passageiros": [{"passageiro": "Maria", "trecho_inicio": 0, "trecho_fim": 0}]}
+{"passageiros": [{"passageiro": "Maria (rotasul)", "trecho_inicio": 0, "trecho_fim": 0}]}
 ```
+
+Passageiros de outras empresas aparecem com a empresa entre parênteses.
 
 Exige login, e **só o motorista dono da carona** pode consultar — outro
 motorista pedindo o mesmo `carona_id` recebe erro ("carona pertence a outro
@@ -156,15 +178,15 @@ motorista"), mesmo estando autenticado.
 
 ### `CANCELAR_CARONA`
 
-Pedido `dados`: `{"carona_id": "c1"}`
+Pedido `dados`: `{"carona_id": "vaijunto-C1"}`
 Resposta `dados`: `{}`
 
 Só o motorista dono da carona pode cancelar. Cancelar uma carona também
-invalida (marca inativa) qualquer reserva que dependesse dela — inclusive
-reservas de itinerário combinado com outra carona ainda ativa, já que o
-itinerário como um todo deixa de poder ser cumprido. Os assentos que essa
-reserva ocupava em outras caronas (as que continuam ativas) voltam a ficar
-livres para outros passageiros.
+cancela qualquer reserva que dependesse dela — inclusive reservas de
+itinerário combinado com caronas de outras empresas, já que o itinerário como
+um todo deixa de poder ser cumprido. A empresa da carona avisa o coordenador
+de cada reserva afetada (`POST /reservas/{id}/invalidacao`), e ele cancela a
+reserva em todas as empresas, devolvendo os assentos.
 
 ### `BUSCAR_ITINERARIOS`
 
@@ -175,7 +197,7 @@ Resposta `dados`:
   "itinerarios": [
     {
       "itens": [{
-        "carona_id": "c1", "trecho_inicio": 0, "trecho_fim": 0,
+        "empresa": "vaijunto", "carona_id": "vaijunto-C1", "trecho_inicio": 0, "trecho_fim": 0,
         "origem": "Salvador", "destino": "Vitoria da Conquista", "preco": 50
       }],
       "preco": 50
@@ -194,8 +216,10 @@ num `RESERVAR`.
 mesmo vale para a data. Não há normalização hoje — é preciso digitar
 exatamente igual ao que foi usado em `PUBLICAR_CARONA`.
 
-Como é feito: o servidor monta um **grafo** a partir das caronas ativas
-naquela data — cada **cidade** é um nó, cada **trecho com assento livre** é
+Como é feito: o servidor junta as suas caronas daquela data com as de cada
+vizinho (`GET /caronas?data=...`, consultados em paralelo, com timeout — um
+vizinho fora do ar é ignorado e a busca continua com os demais) e monta um
+**grafo** a partir dessas caronas — cada **cidade** é um nó, cada **trecho com assento livre** é
 uma **aresta** (marcada com a carona dona do trecho e o preço). Uma busca em
 profundidade (DFS) de `origem` a `destino`, sem revisitar cidade, encontra os
 caminhos possíveis; trechos consecutivos da mesma carona são agrupados num
@@ -213,17 +237,23 @@ propósito — o que seria uma falha de projeto, não só um detalhe estético.
 
 Pedido `dados`:
 ```json
-{"itens": [{"carona_id": "c1", "trecho_inicio": 0, "trecho_fim": 0}]}
+{"itens": [{"empresa": "rotasul", "carona_id": "rotasul-C1", "trecho_inicio": 0, "trecho_fim": 0}]}
 ```
-Resposta `dados`: `{"reserva_id": "r1"}`
+Resposta `dados`: `{"reserva_id": "vaijunto-R1"}`
 
-Regra central do sistema: **todos os itens são validados e confirmados
-atomicamente**, sob o mesmo lock do servidor — ou entram todos, ou nenhum.
+`empresa` é opcional: se vier vazio, o servidor a deduz pelo ID da carona.
+
+Regra central do sistema: **todos os itens são confirmados atomicamente** —
+ou entram todos, ou nenhum —, mesmo quando pertencem a empresas diferentes. O
+servidor do passageiro coordena a reserva em duas fases com as empresas donas
+dos trechos (preparar e depois confirmar ou abortar), como descrito em
+[`api-rest.md`](api-rest.md). A resposta só chega ao cliente depois da decisão.
+Se a reserva for recusada, `erro` explica o motivo (sem assento, empresa
+indisponível, reserva com precedência levou o último assento...).
 Um `ReservarReq` pode conter itens de caronas diferentes (itinerário
 combinado) ou vários trechos consecutivos da mesma carona; é a mesma
-operação nos dois casos, e é a mesma operação usada tanto por uma reserva
-manual quanto por uma reserva feita a partir de um resultado do
-`BUSCAR_ITINERARIOS`.
+operação nos dois casos. O cliente passageiro reserva sempre a partir de um
+resultado do `BUSCAR_ITINERARIOS`, repassando os itens do itinerário escolhido.
 
 ### `LISTAR_MINHAS_RESERVAS`
 
@@ -232,9 +262,9 @@ Resposta `dados`:
 ```json
 {
   "reservas": [{
-    "id": "r1",
+    "id": "vaijunto-R1",
     "itens": [{
-      "carona_id": "c1", "trecho_inicio": 0, "trecho_fim": 0,
+      "empresa": "rotasul", "carona_id": "rotasul-C1", "trecho_inicio": 0, "trecho_fim": 0,
       "origem": "Salvador", "destino": "Vitoria da Conquista", "preco": 50
     }]
   }]
@@ -245,10 +275,11 @@ preenchidos pelo servidor só para exibição.
 
 ### `CANCELAR_RESERVA`
 
-Pedido `dados`: `{"reserva_id": "r1"}`
+Pedido `dados`: `{"reserva_id": "vaijunto-R1"}`
 Resposta `dados`: `{}`
 
-Devolve o(s) assento(s) em cada trecho da reserva cancelada.
+Devolve o(s) assento(s) em cada trecho da reserva cancelada, em todas as
+empresas envolvidas (o coordenador avisa cada uma).
 
 ## Exemplo de troca real (capturado rodando o sistema)
 
@@ -263,7 +294,7 @@ cliente-motorista -> servidor:
 {"tipo":"PUBLICAR_CARONA","dados":{"rota":["Salvador","Vitoria da Conquista"],"data":"20/09/2026","preco_por_trecho":[50],"assentos_por_trecho":[2]}}
 
 servidor -> cliente-motorista:
-{"tipo":"PUBLICAR_CARONA","ok":true,"dados":{"carona_id":"c1"}}
+{"tipo":"PUBLICAR_CARONA","ok":true,"dados":{"carona_id":"vaijunto-C1"}}
 
 cliente-passageiro -> servidor:
 {"tipo":"LOGIN","dados":{"nome":"Passageiro1"}}
@@ -272,20 +303,19 @@ servidor -> cliente-passageiro:
 {"tipo":"LOGIN","ok":true,"dados":{}}
 
 cliente-passageiro -> servidor:
-{"tipo":"RESERVAR","dados":{"itens":[{"carona_id":"c1","trecho_inicio":0,"trecho_fim":0}]}}
+{"tipo":"RESERVAR","dados":{"itens":[{"carona_id":"vaijunto-C1","trecho_inicio":0,"trecho_fim":0}]}}
 
 servidor -> cliente-passageiro:
-{"tipo":"RESERVAR","ok":true,"dados":{"reserva_id":"r1"}}
+{"tipo":"RESERVAR","ok":true,"dados":{"reserva_id":"vaijunto-R1"}}
 ```
 
 ## Concorrência (resumo — detalhes no relatório)
 
-Todo o estado (caronas, reservas, senhas) vive atrás de **um único
-`sync.Mutex`**. Cada goroutine (uma por conexão de cliente) só mexe no
-estado dentro de `Lock()`/`Unlock()`. Um lock único evita a necessidade de
-ordenar múltiplos locks (o que geraria risco de deadlock quando uma reserva
-mexe em várias caronas ao mesmo tempo), ao custo de menos paralelismo
-interno — trade-off medido pelo teste de carga (`cmd/servidor/carga_test.go`).
+Dentro de cada empresa, todo o estado (caronas, reservas, participações,
+senhas) vive atrás de **um único `sync.Mutex`**, como no Problema 1. Entre
+empresas, a coordenação é feita pelo protocolo da API REST (ver
+[`api-rest.md`](api-rest.md)): nenhuma chamada de rede é feita com o mutex
+travado, para que uma empresa lenta nunca bloqueie as operações locais.
 
 ## Confiabilidade
 
@@ -296,16 +326,13 @@ aquela goroutine**. O estado do servidor e as demais conexões continuam
 intactos.
 
 **Timeout de socket**: cada leitura tem um prazo (`conn.SetReadDeadline`,
-reiniciado a cada mensagem recebida) de 10 minutos de inatividade. Se um
-cliente conectar e nunca mandar nada (ou parar de responder no meio de uma
-sessão), a conexão é fechada pelo servidor depois desse prazo, liberando a
-goroutine em vez de mantê-la presa para sempre.
+reiniciado a cada mensagem recebida) de 1 hora de inatividade. Se um cliente
+conectar e nunca mandar nada (ou parar de responder no meio de uma sessão), a
+conexão é fechada pelo servidor depois desse prazo.
 
-**Assento permanentemente bloqueado — por que não acontece aqui**: a
-operação `RESERVAR` é **atômica e de um passo só** (ver seção anterior): ela
-valida e confirma tudo dentro da mesma trava, na mesma chamada. Não existe
-um estado intermediário de "reservado, aguardando confirmação" que possa
-ficar pendurado se o cliente cair no meio do caminho — ou a reserva já
-existe por completo no momento em que a resposta é montada, ou nunca chegou
-a existir. Por isso não há necessidade de um mecanismo de expiração de
-reserva "pendente": não existe reserva pendente neste desenho.
+**Queda do cliente no meio de uma reserva**: a reserva continua sendo
+decidida pelo servidor normalmente; o resultado fica em
+`LISTAR_MINHAS_RESERVAS` na próxima conexão. Diferente do Problema 1, agora
+existe o estado intermediário "assento segurado aguardando decisão" — mas
+ele pertence ao protocolo entre servidores, que garante que esse estado
+sempre termina (ver "Falhas e recuperação" em [`api-rest.md`](api-rest.md)).

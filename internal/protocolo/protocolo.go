@@ -54,7 +54,8 @@ type PublicarCaronaResp struct {
 // Detalhes de uma carona
 type CaronaResumo struct {
 	ID             string    `json:"id"`
-	Motorista      string    `json:"motorista"`
+	Empresa        string    `json:"empresa"`
+	Motorista      string    `json:"motorista,omitempty"`
 	Rota           []string  `json:"rota"`
 	Data           string    `json:"data"`
 	PrecoPorTrecho []float64 `json:"preco_por_trecho"`
@@ -91,7 +92,9 @@ type ConsultarPassageirosResp struct {
 // ItemPedido é usado tanto em pedidos quanto em respostas mais ricas.
 // Algumas operações preenchem também Origem/Destino/Preco, só para exibição
 // (o servidor ignora esses três campos quando o item chega dentro de um pedido).
+// Empresa pode vir vazia num pedido: o servidor a deduz pelo ID da carona.
 type ItemPedido struct {
+	Empresa      string  `json:"empresa,omitempty"`
 	CaronaID     string  `json:"carona_id"`
 	TrechoInicio int     `json:"trecho_inicio"`
 	TrechoFim    int     `json:"trecho_fim"`

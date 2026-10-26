@@ -2,38 +2,39 @@ package main
 
 import (
 	"encoding/json"
+
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
-// processaLinha decodifica uma linha no envelope Pedido e 
+// processaLinha decodifica uma linha no envelope Pedido e
 // despacha para o handler certo pelo campo Tipo.
-func processaLinha(linha string, estado *Estado, sessao *Sessao) protocolo.Resposta {
+func processaLinha(linha string, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	var pedido protocolo.Pedido
 	if err := json.Unmarshal([]byte(linha), &pedido); err != nil {
-		// Mensagem malformada: responde com erro e não derruba a conexão nemo servidor.
+		// Mensagem malformada: responde com erro e não derruba a conexão nem o servidor.
 		return protocolo.Resposta{Ok: false, Erro: "mensagem malformada: " + err.Error()}
 	}
 
 	switch pedido.Tipo {
 	case protocolo.Login:
-		return trataLogin(pedido, estado, sessao)
+		return trataLogin(pedido, s, sessao)
 	case protocolo.PublicarCarona:
-		return trataPublicarCarona(pedido, estado, sessao)
+		return trataPublicarCarona(pedido, s, sessao)
 	case protocolo.ListarCaronas:
-		return trataListarCaronas(pedido, estado)
+		return trataListarCaronas(pedido, s)
 	case protocolo.Reservar:
-		return trataReservar(pedido, estado, sessao)
+		return trataReservar(pedido, s, sessao)
 	case protocolo.CancelarReserva:
-		return trataCancelarReserva(pedido, estado, sessao)
+		return trataCancelarReserva(pedido, s, sessao)
 	case protocolo.ListarMinhasReservas:
-		return trataListarMinhasReservas(pedido, estado, sessao)
+		return trataListarMinhasReservas(pedido, s, sessao)
 	case protocolo.CancelarCarona:
-		return trataCancelarCarona(pedido, estado, sessao)
+		return trataCancelarCarona(pedido, s, sessao)
 	case protocolo.ConsultarPassageiros:
-		return trataConsultarPassageiros(pedido, estado, sessao)
+		return trataConsultarPassageiros(pedido, s, sessao)
 	case protocolo.BuscarItinerarios:
-		return trataBuscarItinerarios(pedido, estado)
+		return trataBuscarItinerarios(pedido, s)
 	default:
 		return erro(pedido, "tipo de operacao desconhecido: "+pedido.Tipo)
 	}
@@ -62,12 +63,12 @@ func exigeLogin(pedido protocolo.Pedido, sessao *Sessao) (protocolo.Resposta, bo
 }
 
 // Trata o pedido de login, criando a senha se for a primeira vez que o nome é usado.
-func trataLogin(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+func trataLogin(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	var req protocolo.LoginReq
 	if err := json.Unmarshal(pedido.Dados, &req); err != nil || req.Nome == "" {
 		return erro(pedido, "nome invalido")
 	}
-	if err := estado.Autentica(req.Nome, req.Senha); err != nil {
+	if err := s.estado.Autentica(req.Nome, req.Senha); err != nil {
 		return erro(pedido, err.Error())
 	}
 	sessao.Nome = req.Nome
@@ -75,7 +76,7 @@ func trataLogin(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protoco
 }
 
 // Trata o pedido de publicar uma nova carona, criando a carona no estado.
-func trataPublicarCarona(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+func trataPublicarCarona(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	if resp, apto := exigeLogin(pedido, sessao); !apto {
 		return resp
 	}
@@ -91,17 +92,26 @@ func trataPublicarCarona(pedido protocolo.Pedido, estado *Estado, sessao *Sessao
 		return erro(pedido, "preco_por_trecho e assentos_por_trecho devem ter um item por trecho")
 	}
 
-	c := estado.PublicarCarona(sessao.Nome, req.Rota, req.Data, req.PrecoPorTrecho, req.AssentosPorTrecho)
+	c := s.estado.PublicarCarona(sessao.Nome, req.Rota, req.Data, req.PrecoPorTrecho, req.AssentosPorTrecho)
 	return ok(pedido, protocolo.PublicarCaronaResp{CaronaID: c.ID})
 }
 
-// Trata o pedido de listar todas as caronas ativas, retornando um resumo de cada uma.
-func trataListarCaronas(pedido protocolo.Pedido, estado *Estado) protocolo.Resposta {
-	caronas := estado.ListarCaronas()
-	resumos := make([]protocolo.CaronaResumo, 0, len(caronas))
-	for _, c := range caronas {
+// Trata o pedido de listar as caronas ativas de todo o consórcio, retornando um resumo de cada uma.
+func trataListarCaronas(pedido protocolo.Pedido, s *Servidor) protocolo.Resposta {
+	caronas := s.caronasDoConsorcio("")
+	lista := make([]dominio.Carona, len(caronas))
+	empresaDe := make(map[string]string, len(caronas))
+	for i, c := range caronas {
+		lista[i] = c.Carona
+		empresaDe[c.ID] = c.Empresa
+	}
+	ordenaCaronas(lista)
+
+	resumos := make([]protocolo.CaronaResumo, 0, len(lista))
+	for _, c := range lista {
 		resumos = append(resumos, protocolo.CaronaResumo{
 			ID:             c.ID,
+			Empresa:        empresaDe[c.ID],
 			Motorista:      c.Motorista,
 			Rota:           c.Rota,
 			Data:           c.Data,
@@ -113,7 +123,7 @@ func trataListarCaronas(pedido protocolo.Pedido, estado *Estado) protocolo.Respo
 }
 
 // Trata o pedido de cancelar uma carona, verificando se o motorista é o dono da carona
-func trataCancelarCarona(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+func trataCancelarCarona(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	if resp, apto := exigeLogin(pedido, sessao); !apto {
 		return resp
 	}
@@ -121,14 +131,14 @@ func trataCancelarCarona(pedido protocolo.Pedido, estado *Estado, sessao *Sessao
 	if err := json.Unmarshal(pedido.Dados, &req); err != nil {
 		return erro(pedido, "dados invalidos")
 	}
-	if err := estado.CancelarCarona(sessao.Nome, req.CaronaID); err != nil {
+	if err := s.CancelarCarona(sessao.Nome, req.CaronaID); err != nil {
 		return erro(pedido, err.Error())
 	}
 	return ok(pedido, struct{}{})
 }
 
 // Trata o pedido de consultar passageiros de uma carona, verificando se o motorista é o dono da carona
-func trataConsultarPassageiros(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+func trataConsultarPassageiros(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	if resp, apto := exigeLogin(pedido, sessao); !apto {
 		return resp
 	}
@@ -136,23 +146,23 @@ func trataConsultarPassageiros(pedido protocolo.Pedido, estado *Estado, sessao *
 	if err := json.Unmarshal(pedido.Dados, &req); err != nil {
 		return erro(pedido, "dados invalidos")
 	}
-	passageiros, err := estado.ConsultarPassageiros(sessao.Nome, req.CaronaID)
+	passageiros, err := s.estado.ConsultarPassageiros(sessao.Nome, req.CaronaID)
 	if err != nil {
 		return erro(pedido, err.Error())
 	}
-	lista := make([]protocolo.PassageiroTrecho, len(passageiros))
-	for i, p := range passageiros {
-		lista[i] = protocolo.PassageiroTrecho{
+	lista := make([]protocolo.PassageiroTrecho, 0, len(passageiros))
+	for _, p := range passageiros {
+		lista = append(lista, protocolo.PassageiroTrecho{
 			Passageiro:   p.Passageiro,
 			TrechoInicio: p.TrechoInicio,
 			TrechoFim:    p.TrechoFim,
-		}
+		})
 	}
 	return ok(pedido, protocolo.ConsultarPassageirosResp{Passageiros: lista})
 }
 
-// Trata o pedido de buscar itinerários, retornando uma lista de itinerários encontrados
-func trataBuscarItinerarios(pedido protocolo.Pedido, estado *Estado) protocolo.Resposta {
+// Trata o pedido de buscar itinerários no consórcio, retornando uma lista de itinerários encontrados
+func trataBuscarItinerarios(pedido protocolo.Pedido, s *Servidor) protocolo.Resposta {
 	var req protocolo.BuscarItinerariosReq
 	if err := json.Unmarshal(pedido.Dados, &req); err != nil {
 		return erro(pedido, "dados invalidos")
@@ -161,32 +171,16 @@ func trataBuscarItinerarios(pedido protocolo.Pedido, estado *Estado) protocolo.R
 		return erro(pedido, "origem, destino e data sao obrigatorios")
 	}
 
-	encontrados := estado.BuscarItinerarios(req.Origem, req.Destino, req.Data)
+	encontrados := BuscarItinerarios(s.caronasDoConsorcio(req.Data), req.Origem, req.Destino)
 	itinerarios := make([]protocolo.ItinerarioEncontrado, 0, len(encontrados))
 	for _, it := range encontrados {
-		itens := make([]protocolo.ItemPedido, len(it.itens))
-		for i, item := range it.itens {
-			itemResp := protocolo.ItemPedido{
-				CaronaID:     item.CaronaID,
-				TrechoInicio: item.TrechoInicio,
-				TrechoFim:    item.TrechoFim,
-			}
-			if carona, existe := estado.BuscarCarona(item.CaronaID); existe {
-				itemResp.Origem = carona.Rota[item.TrechoInicio]
-				itemResp.Destino = carona.Rota[item.TrechoFim+1]
-				for t := item.TrechoInicio; t <= item.TrechoFim; t++ {
-					itemResp.Preco += carona.PrecoPorTrecho[t]
-				}
-			}
-			itens[i] = itemResp
-		}
-		itinerarios = append(itinerarios, protocolo.ItinerarioEncontrado{Itens: itens, Preco: it.preco})
+		itinerarios = append(itinerarios, protocolo.ItinerarioEncontrado{Itens: paraItensPedido(it.itens), Preco: it.preco})
 	}
 	return ok(pedido, protocolo.BuscarItinerariosResp{Itinerarios: itinerarios})
 }
 
-// Trata o pedido de reservar uma carona, convertendo os itens e repassando para o estado
-func trataReservar(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+// Trata o pedido de reservar um itinerário, coordenando a confirmação em todas as empresas envolvidas
+func trataReservar(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	if resp, apto := exigeLogin(pedido, sessao); !apto {
 		return resp
 	}
@@ -198,21 +192,22 @@ func trataReservar(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) prot
 	itens := make([]dominio.ItemReserva, len(req.Itens))
 	for i, it := range req.Itens {
 		itens[i] = dominio.ItemReserva{
+			Empresa:      it.Empresa,
 			CaronaID:     it.CaronaID,
 			TrechoInicio: it.TrechoInicio,
 			TrechoFim:    it.TrechoFim,
 		}
 	}
 
-	id, err := estado.Reservar(sessao.Nome, itens)
+	r, err := s.Reservar(sessao.Nome, itens)
 	if err != nil {
 		return erro(pedido, err.Error())
 	}
-	return ok(pedido, protocolo.ReservarResp{ReservaID: id})
+	return ok(pedido, protocolo.ReservarResp{ReservaID: r.ID})
 }
 
-// Trata o pedido de cancelar uma reserva, convertendo os dados e repassando para o estado
-func trataCancelarReserva(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+// Trata o pedido de cancelar uma reserva, cancelando-a em todas as empresas envolvidas
+func trataCancelarReserva(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	if resp, apto := exigeLogin(pedido, sessao); !apto {
 		return resp
 	}
@@ -220,38 +215,38 @@ func trataCancelarReserva(pedido protocolo.Pedido, estado *Estado, sessao *Sessa
 	if err := json.Unmarshal(pedido.Dados, &req); err != nil {
 		return erro(pedido, "dados invalidos")
 	}
-	if err := estado.CancelarReserva(sessao.Nome, req.ReservaID); err != nil {
+	if err := s.CancelarReserva(sessao.Nome, req.ReservaID); err != nil {
 		return erro(pedido, err.Error())
 	}
 	return ok(pedido, struct{}{})
 }
 
-// Trata o pedido de listar todas as reservas ativas do passageiro, retornando um resumo de cada uma.
-func trataListarMinhasReservas(pedido protocolo.Pedido, estado *Estado, sessao *Sessao) protocolo.Resposta {
+// Trata o pedido de listar todas as reservas confirmadas do passageiro, retornando um resumo de cada uma.
+func trataListarMinhasReservas(pedido protocolo.Pedido, s *Servidor, sessao *Sessao) protocolo.Resposta {
 	if resp, apto := exigeLogin(pedido, sessao); !apto {
 		return resp
 	}
-	reservas := estado.ListarReservas(sessao.Nome)
+	reservas := s.estado.ListarReservas(sessao.Nome)
 	resumos := make([]protocolo.ReservaResumo, 0, len(reservas))
 	for _, r := range reservas {
-		itens := make([]protocolo.ItemPedido, len(r.Itens))
-		for i, it := range r.Itens {
-			item := protocolo.ItemPedido{
-				CaronaID:     it.CaronaID,
-				TrechoInicio: it.TrechoInicio,
-				TrechoFim:    it.TrechoFim,
-			}
-			
-			if carona, existe := estado.BuscarCarona(it.CaronaID); existe {
-				item.Origem = carona.Rota[it.TrechoInicio]
-				item.Destino = carona.Rota[it.TrechoFim+1]
-				for t := it.TrechoInicio; t <= it.TrechoFim; t++ {
-					item.Preco += carona.PrecoPorTrecho[t]
-				}
-			}
-			itens[i] = item
-		}
-		resumos = append(resumos, protocolo.ReservaResumo{ID: r.ID, Itens: itens})
+		resumos = append(resumos, protocolo.ReservaResumo{ID: r.ID, Itens: paraItensPedido(r.Itens)})
 	}
 	return ok(pedido, protocolo.ListarMinhasReservasResp{Reservas: resumos})
+}
+
+// Converte os itens do domínio para o formato do protocolo
+func paraItensPedido(itens []dominio.ItemReserva) []protocolo.ItemPedido {
+	lista := make([]protocolo.ItemPedido, len(itens))
+	for i, it := range itens {
+		lista[i] = protocolo.ItemPedido{
+			Empresa:      it.Empresa,
+			CaronaID:     it.CaronaID,
+			TrechoInicio: it.TrechoInicio,
+			TrechoFim:    it.TrechoFim,
+			Origem:       it.Origem,
+			Destino:      it.Destino,
+			Preco:        it.Preco,
+		}
+	}
+	return lista
 }

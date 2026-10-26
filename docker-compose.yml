@@ -1,29 +1,68 @@
-# Uso local (mesma máquina) para testar antes de ir para duas máquinas distintas do laboratório. 
+# Uso local (mesma máquina): sobe as 3 empresas do consórcio, em malha completa,
+# para testar antes de ir para computadores distintos do laboratório.
+#   docker compose up --build vaijunto rotasul caminhonorte
+#   docker compose run --rm cliente-passageiro vaijunto:8080
+#   docker compose run --rm simulador -servidores=vaijunto:8080,rotasul:8080,caminhonorte:8080 -semear
 services:
-  servidor:
+  vaijunto:
     build:
       context: .
       dockerfile: docker/servidor.Dockerfile
-    command: ["-empresa=vaijunto"]
+    command: ["-empresa=vaijunto", "-vizinhos=http://rotasul:9090,http://caminhonorte:9090"]
     ports:
       - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - dados-vaijunto:/dados
+
+  rotasul:
+    build:
+      context: .
+      dockerfile: docker/servidor.Dockerfile
+    command: ["-empresa=rotasul", "-vizinhos=http://vaijunto:9090,http://caminhonorte:9090"]
+    ports:
+      - "8081:8080"
+      - "9091:9090"
+    volumes:
+      - dados-rotasul:/dados
+
+  caminhonorte:
+    build:
+      context: .
+      dockerfile: docker/servidor.Dockerfile
+    command: ["-empresa=caminhonorte", "-vizinhos=http://vaijunto:9090,http://rotasul:9090"]
+    ports:
+      - "8082:8080"
+      - "9092:9090"
+    volumes:
+      - dados-caminhonorte:/dados
 
   cliente-motorista:
     build:
       context: .
       dockerfile: docker/cliente-motorista.Dockerfile
-    depends_on:
-      - servidor
+    profiles: ["clientes"]
     stdin_open: true
     tty: true
-    command: ["servidor:8080"]
+    command: ["vaijunto:8080"]
 
   cliente-passageiro:
     build:
       context: .
       dockerfile: docker/cliente-passageiro.Dockerfile
-    depends_on:
-      - servidor
+    profiles: ["clientes"]
     stdin_open: true
     tty: true
-    command: ["servidor:8080"]
+    command: ["vaijunto:8080"]
+
+  simulador:
+    build:
+      context: .
+      dockerfile: docker/simulador.Dockerfile
+    profiles: ["simulador"]
+    command: ["-servidores=vaijunto:8080,rotasul:8080,caminhonorte:8080", "-semear"]
+
+volumes:
+  dados-vaijunto:
+  dados-rotasul:
+  dados-caminhonorte:

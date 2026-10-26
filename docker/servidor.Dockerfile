@@ -8,4 +8,5 @@ RUN CGO_ENABLED=0 go build -o /out/servidor ./cmd/servidor
 FROM alpine:3.20
 COPY --from=build /out/servidor /servidor
 EXPOSE 8080 9090
-ENTRYPOINT ["/servidor"]
+VOLUME /dados
+ENTRYPOINT ["/servidor", "-dados=/dados"]
