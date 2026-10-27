@@ -284,6 +284,17 @@ sequenceDiagram
     B-->>A: 200 OK
 ```
 
+**Consequências para o desempenho.** Como nenhuma reserva espera por outra,
+não existe deadlock nem tempo perdido em fila de espera: o tempo de uma
+reserva é limitado pelos timeouts (2 s por empresa consultada). O custo está
+em outro lugar: sob muita disputa pelo mesmo trecho, reservas mais novas são
+recusadas ou abortadas e o passageiro precisa tentar de novo (trabalho
+desperdiçado), e cada preempção acrescenta mensagens (o pedido de preempção e
+os avisos de aborto às empresas da reserva abortada). Também não há
+*starvation*: uma reserva recusada que tenta de novo recebe um timestamp
+maior, mas as reservas mais antigas que a impediam terminam (confirmadas ou
+abortadas), então ela acaba sendo a mais antiga na disputa.
+
 ## Falhas e recuperação
 
 Cada empresa grava cada alteração num arquivo próprio **antes de responder**
